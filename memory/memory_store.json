@@ -11,6 +11,14 @@
         {
             "text": "my project is offline first",
             "created_at": "2026-02-18T17:54:34.827276"
+        },
+        {
+            "text": "jarvis is offline first",
+            "created_at": "2026-02-19T12:35:39.677381"
+        },
+        {
+            "text": "i am king yet",
+            "created_at": "2026-02-20T00:12:53.622203"
         }
     ],
     "temporary": [
@@ -21,6 +29,10 @@
         {
             "text": "testing memory",
             "expires_at": "2026-03-20T17:54:34.848779"
+        },
+        {
+            "text": "testing 123",
+            "expires_at": "2026-03-21T12:35:46.597085"
         }
     ],
     "security_events": []
