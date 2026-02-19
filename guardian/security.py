@@ -56,16 +56,35 @@ def save_whitelist(data):
 # =====================================================
 # SAFE PROCESS TERMINATION
 # =====================================================
+
 def terminate_process_by_name(name):
+    import psutil
+    import time
+
+    terminated = False
+
     for proc in psutil.process_iter(['name']):
         try:
             if proc.info['name'] == name:
-                proc.terminate()
-                return f"Process {name} terminated successfully."
-        except:
-            continue
-    return f"Process {name} not found."
 
+                # Step 1: Try graceful terminate
+                proc.terminate()
+
+                try:
+                    proc.wait(timeout=2)
+                    terminated = True
+                except psutil.TimeoutExpired:
+                    # Step 2: Force kill if not closed
+                    proc.kill()
+                    terminated = True
+
+        except Exception:
+            continue
+
+    if terminated:
+        return f"Process {name} terminated successfully."
+    else:
+        return f"Process {name} not found."
 
 # =====================================================
 # PATH CHECKER

@@ -1,4 +1,5 @@
 from brain.llm import ask_llm
+from brain.injection_guard import check_injection
 
 from guardian.security import (
     scan_system,
@@ -15,26 +16,58 @@ from brain.memory import (
     get_all_memory
 )
 
-
 # =====================================================
 # GLOBAL STATE
-# Used for confirmation flow (terminate yes/no)
 # =====================================================
 pending_termination = None
+pending_warning = None
+bypass_injection = False
 
 
 # =====================================================
 # MAIN ROUTER
-# Routes commands BEFORE sending to LLM
 # =====================================================
 def route_command(user_input: str) -> str:
     global pending_termination
+    global pending_warning
+    global bypass_injection
 
     lower = user_input.lower().strip()
 
-    # -------------------------------------------------
-    # EXIT
-    # -------------------------------------------------
+    # =====================================================
+    # STEP 1 — HANDLE WARNING CONFIRMATION FIRST
+    # =====================================================
+    if pending_warning:
+
+        if lower in ["yes", "y"]:
+            cmd = pending_warning
+            pending_warning = None
+            bypass_injection = True  # allow next execution
+            return route_command(cmd)
+
+        if lower in ["no", "n"]:
+            pending_warning = None
+            return "Command cancelled for safety."
+
+    # =====================================================
+    # STEP 2 — INJECTION GUARD
+    # =====================================================
+    if bypass_injection:
+        bypass_injection = False
+        status, reason = "ALLOW", ""
+    else:
+        status, reason = check_injection(user_input)
+
+    if status == "BLOCK":
+        return f"⚠ BLOCKED: {reason}"
+
+    if status == "WARN":
+        pending_warning = user_input
+        return f"⚠ WARNING: {reason}\nDo you want to proceed? (yes/no)"
+
+    # =====================================================
+    # STEP 3 — BASIC COMMANDS
+    # =====================================================
     if lower in ["exit", "quit"]:
         return "__EXIT__"
 
@@ -48,9 +81,9 @@ def route_command(user_input: str) -> str:
     if lower == "current mode":
         return f"Current defense mode: {get_mode()}"
 
-    # -------------------------------------------------
-    # MEMORY COMMANDS (IMPORTANT — BEFORE LLM)
-    # -------------------------------------------------
+    # =====================================================
+    # STEP 4 — MEMORY SYSTEM
+    # =====================================================
     if lower.startswith("remember this"):
         text = user_input.replace("remember this", "").strip()
         return add_permanent_memory(text)
@@ -62,25 +95,20 @@ def route_command(user_input: str) -> str:
     if lower in ["what do you remember", "memory status"]:
         return get_all_memory()
 
-    # -------------------------------------------------
-    # SECURITY STATUS
-    # -------------------------------------------------
+    # =====================================================
+    # STEP 5 — SECURITY SYSTEM
+    # =====================================================
     if lower.startswith("security status"):
         return f"Cyber-Guardian running in {get_mode()} mode."
 
-    # -------------------------------------------------
-    # SECURITY SCAN (AUTO TERMINATION FLOW)
-    # -------------------------------------------------
     if lower.startswith("security scan"):
 
         result = scan_system()
-
         report = result["report"]
         suspect = result["suspect"]
 
         if suspect:
             pending_termination = suspect
-
             return (
                 report +
                 f"\n\n⚠ High file activity detected.\n"
@@ -90,9 +118,9 @@ def route_command(user_input: str) -> str:
 
         return report
 
-    # -------------------------------------------------
-    # WHITELIST COMMAND
-    # -------------------------------------------------
+    # =====================================================
+    # STEP 6 — WHITELIST
+    # =====================================================
     if lower.startswith("approve "):
         path = user_input.replace("approve ", "").strip()
 
@@ -105,9 +133,9 @@ def route_command(user_input: str) -> str:
         else:
             return "Path already whitelisted."
 
-    # -------------------------------------------------
-    # TERMINATION CONFIRMATION FLOW
-    # -------------------------------------------------
+    # =====================================================
+    # STEP 7 — TERMINATION FLOW
+    # =====================================================
     if pending_termination:
 
         if lower in ["yes", "y"]:
@@ -121,14 +149,14 @@ def route_command(user_input: str) -> str:
             return f"Process {proc} will be allowed to continue."
 
     # -------------------------------------------------
-    # MANUAL TERMINATE
+    # MANUAL TERMINATE (after injection approval)
     # -------------------------------------------------
     if lower.startswith("terminate "):
         process_name = user_input.replace("terminate ", "").strip()
         pending_termination = process_name
         return f"Do you want to terminate {process_name}? (yes/no)"
 
-    # -------------------------------------------------
-    # DEFAULT → LLM
-    # -------------------------------------------------
+    # =====================================================
+    # STEP 8 — DEFAULT (LLM)
+    # =====================================================
     return ask_llm(user_input)
