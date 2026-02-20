@@ -65,15 +65,16 @@ while True:
                   words = user_input.split()
 
                  # too short
-                  if len(words) < 2:
-                     print("⚠ Ignored noise")
-                     continue
+                  # allow single-word commands like exit
+                if len(words) < 2 and user_input.lower() not in ["exit", "stop"]:
+                  print("⚠ Ignored noise")
+                  continue
 
                  # too weird (non-english heavy)
-                  strange_chars = sum(1 for c in user_input if not c.isalnum() and c != " ")
-                  if strange_chars > len(user_input) * 0.3:
-                     print("⚠ Ignored garbage input")
-                     continue
+                strange_chars = sum(1 for c in user_input if not c.isalnum() and c != " ")
+                if strange_chars > len(user_input) * 0.3:
+                    print("⚠ Ignored garbage input")
+                    continue
                 
                 # 🔥 HANDLE SILENCE / FAIL
                 if not user_input or user_input.strip() == "":

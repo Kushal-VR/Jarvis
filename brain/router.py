@@ -174,6 +174,11 @@ def route_command(user_input: str) -> str:
     # =====================================================
     # MEMORY SYSTEM
     # =====================================================
+    # CLEAR TEMP MEMORY
+    if lower == "clear temporary memory":
+     from brain.memory import clear_temporary_memory
+     return clear_temporary_memory()
+    
     if lower.startswith("remember this"):
         text = user_input.replace("remember this", "").strip()
         return add_permanent_memory(text)
@@ -185,10 +190,7 @@ def route_command(user_input: str) -> str:
     if lower in ["what do you remember", "memory status"]:
         return get_all_memory()
     
-    # CLEAR TEMP MEMORY
-    if lower == "clear temporary memory":
-        from brain.memory import clear_temporary_memory
-        return clear_temporary_memory()
+
    
     # =====================================================
     # SECURITY SYSTEM
@@ -207,7 +209,43 @@ def route_command(user_input: str) -> str:
                    f"\n\n⚠ Suspect: {suspect}\nTerminate? (yes/no)"
 
         return compress_response(report)
+    # =========================================
+    # FILE COMMANDS
+    # =========================================
+    if "read" in lower and ".py" in lower:
 
+       import os
+
+       # extract filename
+       words = lower.split()
+       filename = None
+
+       for w in words:
+           if ".py" in w:
+              filename = w
+              break
+ 
+       if not filename:
+          return "Please specify file name clearly."
+
+        # try to find file in project
+       base_path = os.getcwd()
+
+       for root, dirs, files in os.walk(base_path):
+           if filename in files:
+               file_path = os.path.join(root, filename)
+
+               try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                     content = f.read()
+
+                    return f"Reading {filename}:\n" + content[:1000]
+
+               except Exception as e:
+                  return f"Error reading file: {e}"
+
+       return f"{filename} not found."
+    
     # =====================================================
     # DISK SYSTEM (NEW 🔥)
     # =====================================================
