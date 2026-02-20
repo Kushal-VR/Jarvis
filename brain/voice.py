@@ -7,7 +7,7 @@ import threading
 import time
 
 # =========================================
-# LOAD MODEL
+# LOAD MODEL (WAKE + COMMAND)
 # =========================================
 print("🔄 Loading voice model...")
 
@@ -19,9 +19,42 @@ recognizer.SetWords(True)
 
 q = queue.Queue()
 
+# =========================================
+# TEXT CLEANER (VERY IMPORTANT)
+# Fix file names + remove noise
+# =========================================
+def clean_command(text):
+    text = text.lower()
+
+    # 🔥 FILE NAME FIXES
+    replacements = {
+        " dot ": ".",
+        " dot": ".",
+        "dot ": ".",
+
+        " slash ": "/",
+        " backslash ": "\\",
+
+        " dot py": ".py",
+        " dot exe": ".exe",
+        " dot txt": ".txt",
+        " dot json": ".json",
+    }
+
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+
+    # 🔥 REMOVE NOISE WORDS
+    ignore = ["the", "a", "an", "is", "to", "can", "you", "please", "jarvis"]
+
+    words = text.split()
+    filtered = [w for w in words if w not in ignore]
+
+    return " ".join(filtered).strip()
+
 
 # =========================================
-# SAFE TTS ENGINE
+# SAFE TTS ENGINE (NO CRASH / NO LOOP ERROR)
 # =========================================
 tts_lock = threading.Lock()
 
@@ -44,7 +77,7 @@ def speak(text):
 
 
 # =========================================
-# AUDIO CALLBACK
+# AUDIO CALLBACK (MIC STREAM)
 # =========================================
 def callback(indata, frames, time_info, status):
     if status:
@@ -53,96 +86,34 @@ def callback(indata, frames, time_info, status):
 
 
 # =========================================
-# CLEAN COMMAND
+# CLEAR QUEUE (IMPORTANT 🔥)
+# Prevents old audio causing wrong commands
 # =========================================
-def clean_command(text):
-    ignore = ["the", "a", "an", "is", "to", "can", "you", "please"]
-
-    words = text.lower().split()
-    filtered = [w for w in words if w not in ignore]
-
-    return " ".join(filtered)
-
-
-# =========================================
-# CONTINUOUS LISTENING (FIXED - NO EARLY TRIGGER)
-# =========================================
-def listen_continuous():
-    print("🎧 Listening... (say 'exit' to stop)")
-
-    stream = sd.RawInputStream(
-        samplerate=16000,
-        blocksize=2000,
-        dtype='int16',
-        channels=1,
-        callback=callback
-    )
-
-    last_text = ""
-    last_command = ""
-    silence_timer = None
-    silence_threshold = 1.0  # 🔥 tweak (0.8–1.5)
-
-    with stream:
-        while True:
-            data = q.get()
-
-            # ONLY FULL RESULTS (NO PARTIAL TRIGGER)
-            if recognizer.AcceptWaveform(data):
-                result = json.loads(recognizer.Result())
-                text = result.get("text", "").strip()
-
-                if text:
-                    last_text = text
-                    silence_timer = time.time()
-
-            # 🧠 WAIT FOR USER TO FINISH SPEAKING
-            if last_text and silence_timer:
-                if time.time() - silence_timer > silence_threshold:
-
-                    cleaned = clean_command(last_text)
-
-                    # ignore noise
-                    if not cleaned or len(cleaned.split()) < 1:
-                        last_text = ""
-                        continue
-
-                    # prevent repeat spam
-                    if cleaned == last_command:
-                        last_text = ""
-                        continue
-
-                    last_command = cleaned
-
-                    print(f"You (voice): {cleaned}")
-
-                    stream.stop()
-
-                    if "exit" in cleaned:
-                        speak("Shutting down voice mode")
-                        return "__EXIT__"
-
-                    return cleaned
+def clear_queue():
+    while not q.empty():
+        try:
+            q.get_nowait()
+        except:
+            break
 
 
 # =========================================
-# WAKE WORD
+# WAKE WORD LISTENER
 # =========================================
 def listen_for_wake():
     print("🎙 Say 'Jarvis'...")
 
+    clear_queue()
+
     with sd.RawInputStream(
         samplerate=16000,
-        blocksize=2000,
+        blocksize=4000,
         dtype='int16',
         channels=1,
         callback=callback
     ):
         while True:
-            try:
-                data = q.get(timeout=1)
-            except:
-                continue
+            data = q.get()
 
             if recognizer.AcceptWaveform(data):
                 result = json.loads(recognizer.Result())
@@ -152,3 +123,72 @@ def listen_for_wake():
                     print("✅ Wake detected")
                     speak("Yes, I am listening")
                     return True
+
+
+# =========================================
+# CONTINUOUS LISTENING (REAL FIXED VERSION)
+# =========================================
+def listen_continuous():
+    print("🎧 Listening... (say 'exit' to stop)")
+
+    clear_queue()
+
+    stream = sd.RawInputStream(
+        samplerate=16000,
+        blocksize=2000,   # ⚡ faster response
+        dtype='int16',
+        channels=1,
+        callback=callback
+    )
+
+    last_text = ""
+    last_command = ""
+    silence_timer = None
+    silence_threshold = 1.0  # tweak: 0.8–1.2 best
+
+    with stream:
+        while True:
+            data = q.get()
+
+            # ---------------------------------
+            # FULL RESULT ONLY (no partial spam)
+            # ---------------------------------
+            if recognizer.AcceptWaveform(data):
+                result = json.loads(recognizer.Result())
+                text = result.get("text", "").strip()
+
+                if text:
+                    last_text = text
+                    silence_timer = time.time()
+
+            # ---------------------------------
+            # WAIT FOR USER TO FINISH SPEAKING
+            # ---------------------------------
+            if last_text and silence_timer:
+                if time.time() - silence_timer > silence_threshold:
+
+                    cleaned = clean_command(last_text)
+
+                    # ❌ ignore noise
+                    if not cleaned or len(cleaned) < 2:
+                        last_text = ""
+                        continue
+
+                    # ❌ prevent repeat loop
+                    if cleaned == last_command:
+                        last_text = ""
+                        continue
+
+                    last_command = cleaned
+
+                    print(f"You (voice): {cleaned}")
+
+                    # 🔥 STOP MIC BEFORE RESPONSE
+                    stream.stop()
+
+                    # EXIT VOICE MODE
+                    if "exit" in cleaned:
+                        speak("Shutting down voice mode")
+                        return "__EXIT__"
+
+                    return cleaned

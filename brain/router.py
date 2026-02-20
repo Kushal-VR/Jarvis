@@ -1,10 +1,17 @@
 # =====================================================
 # ROUTER - COMMAND EXECUTION LAYER
+# Handles:
+# - Security (Injection Guard)
+# - Memory
+# - System Commands
+# - Orchestrator fallback
 # =====================================================
 
 from brain.llm import ask_llm
 from brain.orchestrator import orchestrate
 from brain.injection_guard import check_injection
+
+from guardian.disk import get_disk_usage, scan_large_files, format_size
 
 from guardian.security import (
     scan_system,
@@ -29,13 +36,55 @@ pending_warning = None
 bypass_injection = False
 last_response = ""
 
+
 # =====================================================
-# SIMILARITY CHECK
+# NORMALIZE VOICE COMMANDS
+# Fixes messy voice inputs
+# =====================================================
+def normalize_command(text: str) -> str:
+    text = text.lower()
+
+    # =========================================
+    # 🔥 MEMORY NORMALIZATION
+    # =========================================
+    if any(x in text for x in ["clear", "delete", "remove"]) and \
+       any(x in text for x in ["temporary", "temp"]):
+        return "clear temporary memory"
+
+    if "memory" in text and ("what" in text or "show" in text):
+        return "memory status"
+
+    # =========================================
+    # 🔥 SECURITY NORMALIZATION
+    # =========================================
+    if "security" in text and "scan" in text:
+        return "security scan"
+
+    if "scan system" in text:
+        return "security scan"
+
+    # =========================================
+    # 🔥 EXIT NORMALIZATION
+    # =========================================
+    if "exit" in text or "stop" in text or "quit" in text:
+        return "exit"
+
+    # =========================================
+    # 🔥 APP CONTROL (future ready)
+    # =========================================
+    if "open chrome" in text:
+        return "open chrome"
+
+    # =========================================
+    # DEFAULT
+    # =========================================
+    return text
+
+
+# =====================================================
+# SIMILARITY CHECK (ANTI-SPAM)
 # =====================================================
 def is_similar(a, b):
-    """
-    Simple similarity check (fast, offline)
-    """
     if not a or not b:
         return False
 
@@ -43,21 +92,16 @@ def is_similar(a, b):
     b_words = set(b.lower().split())
 
     overlap = len(a_words & b_words)
-
     return overlap >= max(2, min(len(a_words), len(b_words)) // 2)
 
 
 # =====================================================
-# RESPONSE COMPRESSOR (VOICE OPTIMIZED)
+# RESPONSE COMPRESSOR (VOICE FRIENDLY)
 # =====================================================
 def compress_response(text):
-    """
-    Makes responses short for voice interaction
-    """
     if not isinstance(text, str):
         return text
 
-    # cut long responses
     if len(text) > 200:
         text = text.split(".")[0]
 
@@ -73,13 +117,18 @@ def route_command(user_input: str) -> str:
     global bypass_injection
     global last_response
 
+    # 🔥 Normalize voice input
+    user_input = normalize_command(user_input)
     lower = user_input.lower().strip()
-
+    
+    # CASUAL RESPONSES
+    if lower in ["thank you", "thanks", "ok", "okay"]:
+      return "You're welcome."
+    
     # =====================================================
-    # STEP 1 — HANDLE WARNING CONFIRMATION
+    # STEP 1 — WARNING CONFIRMATION
     # =====================================================
     if pending_warning:
-
         if lower in ["yes", "y"]:
             cmd = pending_warning
             pending_warning = None
@@ -104,7 +153,7 @@ def route_command(user_input: str) -> str:
 
     if status == "WARN":
         pending_warning = user_input
-        return f"⚠ WARNING: {reason}\nDo you want to proceed? (yes/no)"
+        return f"⚠ WARNING: {reason}\nProceed? (yes/no)"
 
     # =====================================================
     # STEP 3 — BASIC COMMANDS
@@ -120,7 +169,7 @@ def route_command(user_input: str) -> str:
         return set_mode(mode)
 
     if lower == "current mode":
-        return f"Current defense mode: {get_mode()}"
+        return f"Mode: {get_mode()}"
 
     # =====================================================
     # MEMORY SYSTEM
@@ -135,15 +184,19 @@ def route_command(user_input: str) -> str:
 
     if lower in ["what do you remember", "memory status"]:
         return get_all_memory()
-
+    
+    # CLEAR TEMP MEMORY
+    if lower == "clear temporary memory":
+        from brain.memory import clear_temporary_memory
+        return clear_temporary_memory()
+   
     # =====================================================
-    # SECURITY COMMANDS
+    # SECURITY SYSTEM
     # =====================================================
     if lower.startswith("security status"):
         return f"Cyber-Guardian running in {get_mode()} mode."
 
     if lower.startswith("security scan"):
-
         result = scan_system()
         report = result["report"]
         suspect = result["suspect"]
@@ -151,9 +204,19 @@ def route_command(user_input: str) -> str:
         if suspect:
             pending_termination = suspect
             return compress_response(report) + \
-                   f"\n\n⚠ Suspected process: {suspect}\nTerminate? (yes/no)"
+                   f"\n\n⚠ Suspect: {suspect}\nTerminate? (yes/no)"
 
         return compress_response(report)
+
+    # =====================================================
+    # DISK SYSTEM (NEW 🔥)
+    # =====================================================
+    if "disk usage" in lower:
+        size = get_disk_usage("C:\\")
+        return f"Disk usage: {format_size(size)}"
+
+    if "large files" in lower:
+        return scan_large_files("C:\\")
 
     # =====================================================
     # WHITELIST
@@ -194,30 +257,33 @@ def route_command(user_input: str) -> str:
         return f"Terminate {process_name}? (yes/no)"
 
     # =====================================================
-    # DEFAULT → ORCHESTRATOR
+    # DEFAULT → ORCHESTRATOR + LLM FALLBACK
     # =====================================================
     result = orchestrate(user_input)
 
     if isinstance(result, dict):
 
-        if result.get("action") == "terminate":
-            pending_termination = result["target"]
+      if result.get("action") == "terminate":
+        pending_termination = result["target"]
 
-            response = compress_response(result["message"]) + \
-                       f"\n\nTerminate {result['target']}? (yes/no)"
+        response = compress_response(result["message"]) + \
+                   f"\n\nTerminate {result['target']}? (yes/no)"
 
-        else:
-            response = compress_response(result.get("message", ""))
+      else:
+        response = compress_response(result.get("message", ""))
 
     else:
-        response = compress_response(result)
+      response = compress_response(result)
+
 
     # =====================================================
-    # PREVENT REPEATED RESPONSES (SMART)
+    # 🔥 FINAL FALLBACK (FIXED)
     # =====================================================
-    if is_similar(response, last_response):
-      return "Already answered."
+    if not response or response.strip() == "":
+     response = ask_llm(user_input)
 
-    last_response = response
+    # 🔥 STILL EMPTY → SAFE RESPONSE
+    if not response or response.strip() == "":
+      return "I didn't catch that properly."
+
     return response
-

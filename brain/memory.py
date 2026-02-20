@@ -108,6 +108,14 @@ def cleanup_temporary_memory():
     data["temporary"] = filtered
     save_memory(data)
 
+# =====================================================
+# CLEAR TEMPORARY MEMORY
+# =====================================================
+
+def clear_temporary_memory():
+    global temporary_memory
+    temporary_memory = []
+    return "Temporary memory cleared."
 
 # =====================================================
 # SECURITY MEMORY (NEW)

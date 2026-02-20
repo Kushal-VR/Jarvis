@@ -4,9 +4,15 @@
 # It decides WHAT action to take (not just route commands)
 # =====================================================
 
+from pydoc import text
+
 from guardian.security import scan_system, terminate_process_by_name
 from brain.memory import get_all_memory
 from brain.llm import ask_llm
+from brain.dev_agent import read_file
+
+
+
 
 
 # =====================================================
@@ -65,7 +71,34 @@ def orchestrate(user_input: str):
     """
 
     text = user_input.lower()
+    
+    # -------------------------------
+    # DEV AGENT INTENT (SMART PARSING)
+    # -------------------------------
+    words = text.split()
+    if "create file" in text:
+      # try to get filename
+      if len(words) >= 3:
+        filename = words[-1]
+        return {
+            "action": "dev_create",
+            "target": filename
+        }
+      else:
+        return {"message": "Please specify file name clearly."}
 
+
+    if "read file" in text:
+
+       if len(words) >= 3:
+        filename = words[-1]
+        return {
+            "action": "dev_read",
+            "target": filename
+        }
+       else:
+        return {"message": "Please specify file name clearly."}
+   
     # =====================================================
     # SECURITY: FULL SYSTEM SCAN
     # =====================================================
