@@ -1,24 +1,24 @@
 import os
 
-# =====================================================
-# READ FILE CONTENT
-# =====================================================
+
 def read_file(path: str):
     """
-    Reads a file safely
+    Reads file safely without random cut
     """
+
     try:
         if not os.path.exists(path):
             return "File not found."
 
-        # limit size (prevent huge file crash)
-        if os.path.getsize(path) > 200000:
-            return "File too large to read."
+        # 🔥 increase limit (IMPORTANT)
+        if os.path.getsize(path) > 500000:
+            return "File too large to display fully."
 
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        return f"📄 File: {path}\n\n{content}"
+        # 🔥 DO NOT CUT randomly
+        return f"📄 Reading file: {path}\n\n{content}"
 
     except Exception as e:
         return f"Error reading file: {str(e)}"

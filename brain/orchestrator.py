@@ -1,44 +1,41 @@
 # =====================================================
 # ORCHESTRATOR - CENTRAL DECISION ENGINE
-# This is the "brain above router"
-# It decides WHAT action to take (not just route commands)
 # =====================================================
 
-from pydoc import text
-
-from guardian.security import scan_system, terminate_process_by_name
+from guardian.security import scan_system
 from brain.memory import get_all_memory
 from brain.llm import ask_llm
-from brain.dev_agent import read_file
+from brain.intent_engine import IntentEngine
+from brain.file_resolver import resolve_filename
+from brain.planner import Planner
 
-
-
+from brain.web.news import get_ai_news
+from brain.web.search import search_duckduckgo
+from brain.web.scraper import extract_titles
+from brain.web.summarizer import summarize_list
 
 
 # =====================================================
-# HELPER: EXTRACT HIGH-RISK PROCESS FROM REPORT
-# This reads scan output and finds risky processes
+# INIT
+# =====================================================
+intent_engine = IntentEngine()
+planner = Planner()
+
+
+# =====================================================
+# HELPER: DETECT RISKY PROCESS
 # =====================================================
 def detect_risky_process(report_text):
-    """
-    Parses scan report and finds highest-risk process.
-
-    Returns:
-        process_name (str) OR None
-    """
 
     lines = report_text.split("\n")
     risky = []
 
     for line in lines:
-        # Look for lines like:
-        # chrome.exe → Risk Score: 35 (MEDIUM)
         if "→ Risk Score:" in line:
             try:
                 name = line.split("→")[0].strip()
                 score = int(line.split("Risk Score:")[1].split()[0])
 
-                # Only consider meaningful risk
                 if score >= 20:
                     risky.append((name, score))
 
@@ -48,118 +45,138 @@ def detect_risky_process(report_text):
     if not risky:
         return None
 
-    # Sort by highest risk
     risky.sort(key=lambda x: x[1], reverse=True)
-
-    return risky[0][0]  # return process name
+    return risky[0][0]
 
 
 # =====================================================
-# MAIN ORCHESTRATOR FUNCTION
+# MAIN ORCHESTRATOR
 # =====================================================
 def orchestrate(user_input: str):
-    """
-    Central brain:
-    Decides WHAT to do before router executes it.
-
-    Returns structured response:
-    {
-        "action": optional (e.g., terminate),
-        "target": optional (process name),
-        "message": string output
-    }
-    """
 
     text = user_input.lower()
-    
-    # -------------------------------
-    # DEV AGENT INTENT (SMART PARSING)
-    # -------------------------------
-    words = text.split()
-    if "create file" in text:
-      # try to get filename
-      if len(words) >= 3:
-        filename = words[-1]
-        return {
-            "action": "dev_create",
-            "target": filename
-        }
-      else:
+
+    # =====================================================
+    # 🧠 INTENT DETECTION
+    # =====================================================
+    intent_data = intent_engine.detect_intent(user_input)
+
+    print("🧠 ORCHESTRATOR INTENT:", intent_data)
+
+    intent = intent_data["intent"]
+    entities = intent_data["entities"]
+
+    # =====================================================
+    # 🧠 CREATE PLAN
+    # =====================================================
+    plan = planner.create_plan(intent_data)
+    print("🧠 PLAN:", plan)
+
+    # =====================================================
+    # 📂 FILE READ
+    # =====================================================
+    if intent == "read_file":
+        raw_filename = entities.get("file")
+
+        if raw_filename:
+            filename = resolve_filename(raw_filename)
+            print(f"🛠 RESOLVED FILE: {raw_filename} → {filename}")
+
+            return {
+                "action": "dev_read",
+                "target": filename
+            }
+
         return {"message": "Please specify file name clearly."}
 
-
-    if "read file" in text:
-
-       if len(words) >= 3:
-        filename = words[-1]
-        return {
-            "action": "dev_read",
-            "target": filename
-        }
-       else:
-        return {"message": "Please specify file name clearly."}
-   
     # =====================================================
-    # SECURITY: FULL SYSTEM SCAN
+    # 🌐 SMART WEB SEARCH (FIXED + INTELLIGENT)
     # =====================================================
-    if "check system" in text or "scan system" in text:
+    if intent == "search_web":
+
+        query = entities.get("query", "").lower().strip().replace(".", "")
+
+        # =====================================================
+        # 🔥 AI NEWS ONLY
+        # =====================================================
+        if "ai" in query:
+            print("📰 Fetching AI news...")
+            news = get_ai_news()
+
+            print("📰 RAW NEWS:", news)
+
+            if not news:
+                return {"message": "Couldn't fetch AI news right now."}
+
+            summary = "Here’s latest AI news:\n\n"
+
+            for i, item in enumerate(news, 1):
+                summary += f"{i}. {item.strip()}\n"
+
+            return {"message": summary.strip()}
+
+        # =====================================================
+        # 🌍 GENERAL SEARCH
+        # =====================================================
+        print("🌍 Fetching general web results...")
+
+        data = None
+
+        for step in plan:
+            tool = step["tool"]
+
+            if tool == "web_search":
+                data = search_duckduckgo(query)
+
+            elif tool == "web_scraper":
+                data = extract_titles(data)
+
+            elif tool == "summarizer":
+                data = summarize_list(data)
+
+        if not data:
+            return {"message": "No results found."}
+
+        return {"message": data}
+
+    # =====================================================
+    # SECURITY
+    # =====================================================
+    if "scan system" in text:
         result = scan_system()
+        return {"message": result["report"]}
 
-        return {
-            "message": result["report"]
-        }
-
-    # =====================================================
-    # SECURITY: CLOSE RISKY APPS (SMART DECISION)
-    # =====================================================
-    if "close risky" in text or "stop threat" in text:
+    if "close risky" in text:
         result = scan_system()
-
         report = result["report"]
-
-        # First priority → disk spike suspect
         suspect = result.get("suspect")
 
         if suspect:
             return {
                 "action": "terminate",
                 "target": suspect,
-                "message": (
-                    report +
-                    f"\n\n⚠ High-risk activity detected.\n"
-                    f"Suspected process: {suspect}"
-                )
+                "message": report + f"\n\n⚠ Suspected: {suspect}"
             }
 
-        # Second → parse report for risky processes
-        risky_process = detect_risky_process(report)
+        risky = detect_risky_process(report)
 
-        if risky_process:
+        if risky:
             return {
                 "action": "terminate",
-                "target": risky_process,
-                "message": (
-                    report +
-                    f"\n\n⚠ Suggested action:\n"
-                    f"Terminate {risky_process}?"
-                )
+                "target": risky,
+                "message": report + f"\n\n⚠ Suggested: {risky}"
             }
 
-        # If nothing risky
-        return {
-            "message": report + "\n\nNo high-risk processes found."
-        }
+        return {"message": report}
 
     # =====================================================
-    # MEMORY: RECALL
+    # MEMORY
     # =====================================================
     if "what do you remember" in text:
-        return {
-            "message": get_all_memory()
-        }
+        return {"message": get_all_memory()}
 
     # =====================================================
-    # DEFAULT: LLM THINKING
+    # DEFAULT → LLM
     # =====================================================
     response = ask_llm(user_input)
 

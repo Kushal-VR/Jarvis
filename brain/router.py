@@ -1,10 +1,5 @@
 # =====================================================
-# ROUTER - COMMAND EXECUTION LAYER
-# Handles:
-# - Security (Injection Guard)
-# - Memory
-# - System Commands
-# - Orchestrator fallback
+# ROUTER - EXECUTION LAYER (CLEANED + FIXED)
 # =====================================================
 
 from brain.llm import ask_llm
@@ -12,12 +7,9 @@ from brain.orchestrator import orchestrate
 from brain.injection_guard import check_injection
 
 from guardian.disk import get_disk_usage, scan_large_files, format_size
-
 from guardian.security import (
     scan_system,
     terminate_process_by_name,
-    load_whitelist,
-    save_whitelist,
 )
 
 from guardian.mode import set_mode, get_mode
@@ -25,85 +17,51 @@ from guardian.mode import set_mode, get_mode
 from brain.memory import (
     add_permanent_memory,
     add_temporary_memory,
-    get_all_memory
+    get_all_memory,
+    clear_temporary_memory
 )
+
+from guardian.system_control import (
+    open_app,
+    shutdown_system,
+    restart_system,
+    get_disk_status,
+    clean_temp_files
+)
+
+from brain.dev_agent import read_file
+
+import os
+
 
 # =====================================================
 # GLOBAL STATE
 # =====================================================
 pending_termination = None
 pending_warning = None
+pending_system_action = None
 bypass_injection = False
 last_response = ""
 
 
 # =====================================================
-# NORMALIZE VOICE COMMANDS
-# Fixes messy voice inputs
-# =====================================================
-def normalize_command(text: str) -> str:
-    text = text.lower()
-
-    # =========================================
-    # 🔥 MEMORY NORMALIZATION
-    # =========================================
-    if any(x in text for x in ["clear", "delete", "remove"]) and \
-       any(x in text for x in ["temporary", "temp"]):
-        return "clear temporary memory"
-
-    if "memory" in text and ("what" in text or "show" in text):
-        return "memory status"
-
-    # =========================================
-    # 🔥 SECURITY NORMALIZATION
-    # =========================================
-    if "security" in text and "scan" in text:
-        return "security scan"
-
-    if "scan system" in text:
-        return "security scan"
-
-    # =========================================
-    # 🔥 EXIT NORMALIZATION
-    # =========================================
-    if "exit" in text or "stop" in text or "quit" in text:
-        return "exit"
-
-    # =========================================
-    # 🔥 APP CONTROL (future ready)
-    # =========================================
-    if "open chrome" in text:
-        return "open chrome"
-
-    # =========================================
-    # DEFAULT
-    # =========================================
-    return text
-
-
-# =====================================================
-# SIMILARITY CHECK (ANTI-SPAM)
-# =====================================================
-def is_similar(a, b):
-    if not a or not b:
-        return False
-
-    a_words = set(a.lower().split())
-    b_words = set(b.lower().split())
-
-    overlap = len(a_words & b_words)
-    return overlap >= max(2, min(len(a_words), len(b_words)) // 2)
-
-
-# =====================================================
-# RESPONSE COMPRESSOR (VOICE FRIENDLY)
+# RESPONSE COMPRESSOR
 # =====================================================
 def compress_response(text):
+    """
+    Smart compression without breaking structured output
+    """
+
     if not isinstance(text, str):
         return text
 
-    if len(text) > 200:
-        text = text.split(".")[0]
+    # 🔥 DO NOT break numbered lists or multi-line output
+    if "\n" in text:
+        return text.strip()
+
+    # only shorten long plain sentences
+    if len(text) > 300:
+        return text[:300] + "..."
 
     return text.strip()
 
@@ -114,19 +72,22 @@ def compress_response(text):
 def route_command(user_input: str) -> str:
     global pending_termination
     global pending_warning
+    global pending_system_action
     global bypass_injection
     global last_response
 
-    # 🔥 Normalize voice input
-    user_input = normalize_command(user_input)
     lower = user_input.lower().strip()
-    
-    # CASUAL RESPONSES
-    if lower in ["thank you", "thanks", "ok", "okay"]:
-      return "You're welcome."
-    
+
+    print(f"[Router] Input: {user_input}")
+
     # =====================================================
-    # STEP 1 — WARNING CONFIRMATION
+    # CASUAL
+    # =====================================================
+    if lower in ["thank you", "thanks", "ok", "okay"]:
+        return "You're welcome."
+
+    # =====================================================
+    # WARNING CONFIRMATION
     # =====================================================
     if pending_warning:
         if lower in ["yes", "y"]:
@@ -140,7 +101,25 @@ def route_command(user_input: str) -> str:
             return "Command cancelled for safety."
 
     # =====================================================
-    # STEP 2 — INJECTION GUARD
+    # SYSTEM CONFIRMATION
+    # =====================================================
+    if pending_system_action:
+        if lower in ["yes", "y"]:
+            action = pending_system_action
+            pending_system_action = None
+
+            if action == "shutdown":
+                return shutdown_system()
+
+            if action == "restart":
+                return restart_system()
+
+        if lower in ["no", "n"]:
+            pending_system_action = None
+            return "Cancelled."
+
+    # =====================================================
+    # INJECTION GUARD
     # =====================================================
     if bypass_injection:
         bypass_injection = False
@@ -156,13 +135,13 @@ def route_command(user_input: str) -> str:
         return f"⚠ WARNING: {reason}\nProceed? (yes/no)"
 
     # =====================================================
-    # STEP 3 — BASIC COMMANDS
+    # EXIT
     # =====================================================
-    if lower in ["exit", "quit"]:
+    if lower == "exit":
         return "__EXIT__"
 
     # =====================================================
-    # MODE COMMANDS
+    # MODE
     # =====================================================
     if lower.startswith("mode "):
         mode = user_input.replace("mode ", "").strip()
@@ -172,13 +151,11 @@ def route_command(user_input: str) -> str:
         return f"Mode: {get_mode()}"
 
     # =====================================================
-    # MEMORY SYSTEM
+    # MEMORY
     # =====================================================
-    # CLEAR TEMP MEMORY
     if lower == "clear temporary memory":
-     from brain.memory import clear_temporary_memory
-     return clear_temporary_memory()
-    
+        return clear_temporary_memory()
+
     if lower.startswith("remember this"):
         text = user_input.replace("remember this", "").strip()
         return add_permanent_memory(text)
@@ -189,15 +166,10 @@ def route_command(user_input: str) -> str:
 
     if lower in ["what do you remember", "memory status"]:
         return get_all_memory()
-    
 
-   
     # =====================================================
-    # SECURITY SYSTEM
+    # SECURITY (DIRECT)
     # =====================================================
-    if lower.startswith("security status"):
-        return f"Cyber-Guardian running in {get_mode()} mode."
-
     if lower.startswith("security scan"):
         result = scan_system()
         report = result["report"]
@@ -209,45 +181,9 @@ def route_command(user_input: str) -> str:
                    f"\n\n⚠ Suspect: {suspect}\nTerminate? (yes/no)"
 
         return compress_response(report)
-    # =========================================
-    # FILE COMMANDS
-    # =========================================
-    if "read" in lower and ".py" in lower:
 
-       import os
-
-       # extract filename
-       words = lower.split()
-       filename = None
-
-       for w in words:
-           if ".py" in w:
-              filename = w
-              break
- 
-       if not filename:
-          return "Please specify file name clearly."
-
-        # try to find file in project
-       base_path = os.getcwd()
-
-       for root, dirs, files in os.walk(base_path):
-           if filename in files:
-               file_path = os.path.join(root, filename)
-
-               try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                     content = f.read()
-
-                    return f"Reading {filename}:\n" + content[:1000]
-
-               except Exception as e:
-                  return f"Error reading file: {e}"
-
-       return f"{filename} not found."
-    
     # =====================================================
-    # DISK SYSTEM (NEW 🔥)
+    # DISK
     # =====================================================
     if "disk usage" in lower:
         size = get_disk_usage("C:\\")
@@ -256,72 +192,65 @@ def route_command(user_input: str) -> str:
     if "large files" in lower:
         return scan_large_files("C:\\")
 
-    # =====================================================
-    # WHITELIST
-    # =====================================================
-    if lower.startswith("approve "):
-        path = user_input.replace("approve ", "").strip()
+    if "disk status" in lower:
+        return get_disk_status()
 
-        whitelist = load_whitelist()
-
-        if path not in whitelist["approved_paths"]:
-            whitelist["approved_paths"].append(path)
-            save_whitelist(whitelist)
-            return f"Approved: {path}"
-        else:
-            return "Already approved."
+    if "clean temp" in lower:
+        return clean_temp_files()
 
     # =====================================================
-    # TERMINATION FLOW
+    # SYSTEM CONTROL
     # =====================================================
-    if pending_termination:
+    if lower.startswith("open "):
+        app = user_input.replace("open ", "").strip()
+        return open_app(app)
 
-        if lower in ["yes", "y"]:
-            result = terminate_process_by_name(pending_termination)
-            pending_termination = None
-            return result
+    if "shutdown" in lower:
+        pending_system_action = "shutdown"
+        return "⚠ Shutdown system? (yes/no)"
 
-        if lower in ["no", "n"]:
-            proc = pending_termination
-            pending_termination = None
-            return f"{proc} allowed."
-
-    # =====================================================
-    # MANUAL TERMINATE
-    # =====================================================
-    if lower.startswith("terminate "):
-        process_name = user_input.replace("terminate ", "").strip()
-        pending_termination = process_name
-        return f"Terminate {process_name}? (yes/no)"
+    if "restart" in lower:
+        pending_system_action = "restart"
+        return "⚠ Restart system? (yes/no)"
 
     # =====================================================
-    # DEFAULT → ORCHESTRATOR + LLM FALLBACK
+    # 🧠 ORCHESTRATOR (FINAL AUTHORITY)
     # =====================================================
     result = orchestrate(user_input)
 
     if isinstance(result, dict):
 
-      if result.get("action") == "terminate":
-        pending_termination = result["target"]
+        action = result.get("action")
+        target = result.get("target")
 
-        response = compress_response(result["message"]) + \
-                   f"\n\nTerminate {result['target']}? (yes/no)"
+        # 🔥 HANDLE ACTIONS
+        if action == "terminate":
+            pending_termination = target
+            return f"Terminate {target}? (yes/no)"
 
-      else:
-        response = compress_response(result.get("message", ""))
+        if action == "dev_read":
+            return read_file(target)
 
-    else:
-      response = compress_response(result)
-
+        # 🔥 MOST IMPORTANT FIX → RETURN MESSAGE DIRECTLY
+        if "message" in result:
+            return compress_response(result["message"])
 
     # =====================================================
-    # 🔥 FINAL FALLBACK (FIXED)
+    # FALLBACK (LLM)
     # =====================================================
-    if not response or response.strip() == "":
-     response = ask_llm(user_input)
+    response = ask_llm(user_input)
 
-    # 🔥 STILL EMPTY → SAFE RESPONSE
-    if not response or response.strip() == "":
-      return "I didn't catch that properly."
+    if not response:
+        return "I didn't catch that properly."
+
+    # =====================================================
+    # ANTI-REPEAT
+    # =====================================================
+    if response == last_response:
+        return "I already answered that."
+
+    last_response = response
+
+    print(f"[Router] Output: {response}")
 
     return response
