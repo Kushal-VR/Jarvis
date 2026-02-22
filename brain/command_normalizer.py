@@ -36,7 +36,7 @@ def normalize_command(text: str) -> str:
     # =========================================
     # REMOVE FILLER WORDS
     # =========================================
-    fillers = ["please", "jarvis", "hey", "i said", "can you", "just"]
+    fillers = ["please", "hey", "i said", "can you", "just"]
 
     for f in fillers:
         text = text.replace(f, "")

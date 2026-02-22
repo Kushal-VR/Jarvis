@@ -1,13 +1,18 @@
+# =====================================================
+# VOICE ENGINE (WAKE + LISTEN + SPEAK) - FINAL STABLE
+# =====================================================
+
 import queue
 import json
 import sounddevice as sd
-import pyttsx3
 from vosk import Model, KaldiRecognizer
+import pyttsx3
 import threading
 import time
 
+
 # =========================================
-# LOAD MODEL (WAKE + COMMAND)
+# LOAD MODEL
 # =========================================
 print("🔄 Loading voice model...")
 
@@ -19,22 +24,19 @@ recognizer.SetWords(True)
 
 q = queue.Queue()
 
+
 # =========================================
-# TEXT CLEANER (VERY IMPORTANT)
-# Fix file names + remove noise
+# TEXT CLEANER
 # =========================================
 def clean_command(text):
     text = text.lower()
 
-    # 🔥 FILE NAME FIXES
     replacements = {
         " dot ": ".",
         " dot": ".",
         "dot ": ".",
-
         " slash ": "/",
         " backslash ": "\\",
-
         " dot py": ".py",
         " dot exe": ".exe",
         " dot txt": ".txt",
@@ -44,8 +46,7 @@ def clean_command(text):
     for k, v in replacements.items():
         text = text.replace(k, v)
 
-    # 🔥 REMOVE NOISE WORDS
-    ignore = ["the", "a", "an", "is", "to", "can", "you", "please", "jarvis"]
+    ignore = ["the", "a", "an", "is", "to", "can", "you", "please"]
 
     words = text.split()
     filtered = [w for w in words if w not in ignore]
@@ -54,30 +55,90 @@ def clean_command(text):
 
 
 # =========================================
-# SAFE TTS ENGINE (NO CRASH / NO LOOP ERROR)
+# 🔊 TTS ENGINE (FINAL FIX - QUEUE BASED)
 # =========================================
-tts_lock = threading.Lock()
+engine = None
+tts_queue = queue.Queue()
+is_speaking = False
+
+
+def init_tts():
+    global engine
+
+    if engine is None:
+        engine = pyttsx3.init("sapi5")  # Windows stable engine
+        engine.setProperty('rate', 170)
+        engine.setProperty('volume', 1.0)
+
+        voices = engine.getProperty('voices')
+        if voices:
+            engine.setProperty('voice', voices[0].id)
+
+        # 🔥 Start background TTS worker
+        threading.Thread(target=_tts_worker, daemon=True).start()
+
+
+def _tts_worker():
+    global is_speaking
+
+    while True:
+        text = tts_queue.get()
+
+        if text is None:
+            continue
+
+        try:
+            is_speaking = True
+
+            engine.stop()
+            engine.say(text)
+            engine.runAndWait()
+
+        except Exception as e:
+            print("TTS ERROR:", e)
+
+        finally:
+            is_speaking = False
+            tts_queue.task_done()
+
 
 def speak(text):
-    try:
-        with tts_lock:
-            print(f"Jarvis (voice): {text}")
+    if not text:
+        return
 
-            engine = pyttsx3.init()
+    def run():
+        global is_speaking
+
+        try:
+            is_speaking = True
+
+            # 🔥 FULL RESET ENGINE EVERY TIME (fix silent bug)
+            engine = pyttsx3.init("sapi5")
+
             engine.setProperty('rate', 170)
+            engine.setProperty('volume', 1.0)
+
+            voices = engine.getProperty('voices')
+            if voices:
+                engine.setProperty('voice', voices[0].id)
 
             engine.say(text)
             engine.runAndWait()
 
             engine.stop()
-            del engine
+            del engine  # 🔥 force cleanup
 
-    except Exception as e:
-        print("TTS error:", e)
+        except Exception as e:
+            print("TTS ERROR:", e)
+
+        finally:
+            is_speaking = False
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 # =========================================
-# AUDIO CALLBACK (MIC STREAM)
+# AUDIO CALLBACK
 # =========================================
 def callback(indata, frames, time_info, status):
     if status:
@@ -86,8 +147,7 @@ def callback(indata, frames, time_info, status):
 
 
 # =========================================
-# CLEAR QUEUE (IMPORTANT 🔥)
-# Prevents old audio causing wrong commands
+# CLEAR AUDIO QUEUE
 # =========================================
 def clear_queue():
     while not q.empty():
@@ -108,7 +168,7 @@ def listen_for_wake():
     with sd.RawInputStream(
         samplerate=16000,
         blocksize=4000,
-        dtype='int16',
+        dtype="int16",
         channels=1,
         callback=callback
     ):
@@ -121,12 +181,12 @@ def listen_for_wake():
 
                 if "jarvis" in text:
                     print("✅ Wake detected")
-                    speak("Yes, I am listening")
+                    speak("Yes?")
                     return True
 
 
 # =========================================
-# CONTINUOUS LISTENING (REAL FIXED VERSION)
+# 🎧 CONTINUOUS LISTEN (UNCHANGED)
 # =========================================
 def listen_continuous():
     print("🎧 Listening... (say 'exit' to stop)")
@@ -135,8 +195,8 @@ def listen_continuous():
 
     stream = sd.RawInputStream(
         samplerate=16000,
-        blocksize=2000,   # ⚡ faster response
-        dtype='int16',
+        blocksize=2000,
+        dtype="int16",
         channels=1,
         callback=callback
     )
@@ -144,15 +204,12 @@ def listen_continuous():
     last_text = ""
     last_command = ""
     silence_timer = None
-    silence_threshold = 1.0  # tweak: 0.8–1.2 best
+    silence_threshold = 1.0
 
     with stream:
         while True:
             data = q.get()
 
-            # ---------------------------------
-            # FULL RESULT ONLY (no partial spam)
-            # ---------------------------------
             if recognizer.AcceptWaveform(data):
                 result = json.loads(recognizer.Result())
                 text = result.get("text", "").strip()
@@ -161,20 +218,15 @@ def listen_continuous():
                     last_text = text
                     silence_timer = time.time()
 
-            # ---------------------------------
-            # WAIT FOR USER TO FINISH SPEAKING
-            # ---------------------------------
             if last_text and silence_timer:
                 if time.time() - silence_timer > silence_threshold:
 
                     cleaned = clean_command(last_text)
 
-                    # ❌ ignore noise
                     if not cleaned or len(cleaned) < 2:
                         last_text = ""
                         continue
 
-                    # ❌ prevent repeat loop
                     if cleaned == last_command:
                         last_text = ""
                         continue
@@ -183,12 +235,10 @@ def listen_continuous():
 
                     print(f"You (voice): {cleaned}")
 
-                    # 🔥 STOP MIC BEFORE RESPONSE
                     stream.stop()
 
-                    # EXIT VOICE MODE
                     if "exit" in cleaned:
-                        speak("Shutting down voice mode")
+                        speak("Going to sleep")
                         return "__EXIT__"
 
                     return cleaned
