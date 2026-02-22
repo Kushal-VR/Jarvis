@@ -1,16 +1,13 @@
 # =====================================================
-# ROUTER - EXECUTION LAYER (CLEANED + FIXED)
+# ROUTER - EXECUTION LAYER (FINAL UPGRADED)
 # =====================================================
 
 from brain.llm import ask_llm
 from brain.orchestrator import orchestrate
 from brain.injection_guard import check_injection
 
-from guardian.disk import get_disk_usage, scan_large_files, format_size
-from guardian.security import (
-    scan_system,
-    terminate_process_by_name,
-)
+from guardian.disk import get_disk_usage, format_size
+from guardian.security import scan_system
 
 from guardian.mode import set_mode, get_mode
 
@@ -23,15 +20,18 @@ from brain.memory import (
 
 from guardian.system_control import (
     open_app,
+    open_path,
     shutdown_system,
     restart_system,
     get_disk_status,
-    clean_temp_files
+    clean_temp_files,
+    scan_large_files,
+    delete_path
 )
 
 from brain.dev_agent import read_file
 
-import os
+import webbrowser
 
 
 # =====================================================
@@ -48,18 +48,12 @@ last_response = ""
 # RESPONSE COMPRESSOR
 # =====================================================
 def compress_response(text):
-    """
-    Smart compression without breaking structured output
-    """
-
     if not isinstance(text, str):
         return text
 
-    # 🔥 DO NOT break numbered lists or multi-line output
     if "\n" in text:
         return text.strip()
 
-    # only shorten long plain sentences
     if len(text) > 300:
         return text[:300] + "..."
 
@@ -79,6 +73,18 @@ def route_command(user_input: str) -> str:
     lower = user_input.lower().strip()
 
     print(f"[Router] Input: {user_input}")
+
+    # =====================================================
+    # 🔥 MULTI COMMAND SUPPORT
+    # =====================================================
+    if " and " in lower:
+        parts = user_input.split(" and ")
+        responses = []
+
+        for part in parts:
+            responses.append(route_command(part.strip()))
+
+        return "\n".join(responses)
 
     # =====================================================
     # CASUAL
@@ -168,7 +174,7 @@ def route_command(user_input: str) -> str:
         return get_all_memory()
 
     # =====================================================
-    # SECURITY (DIRECT)
+    # SECURITY
     # =====================================================
     if lower.startswith("security scan"):
         result = scan_system()
@@ -183,28 +189,68 @@ def route_command(user_input: str) -> str:
         return compress_response(report)
 
     # =====================================================
-    # DISK
+    # 🔥 DISK / STORAGE (PRIORITY)
     # =====================================================
-    if "disk usage" in lower:
-        size = get_disk_usage("C:\\")
-        return f"Disk usage: {format_size(size)}"
-
-    if "large files" in lower:
+    if "what takes my" in lower and "storage" in lower:
         return scan_large_files("C:\\")
 
-    if "disk status" in lower:
+    if any(x in lower for x in ["storage", "space", "disk usage"]):
         return get_disk_status()
 
-    if "clean temp" in lower:
+    if any(x in lower for x in ["large file", "big files", "heavy files"]):
+        return scan_large_files("C:\\")
+
+    if any(x in lower for x in ["clean temp", "clear temp", "temporary files"]):
         return clean_temp_files()
+
+    # =====================================================
+    # DELETE (SAFE)
+    # =====================================================
+    if lower.startswith("delete "):
+        path = user_input.replace("delete ", "").strip()
+        return delete_path(path)
+
+    # =====================================================
+    # OPEN + SEARCH (COMBINED)
+    # =====================================================
+    if "open" in lower and "search" in lower:
+        try:
+            parts = lower.split("search")
+            app_part = parts[0].replace("open", "").strip()
+            query = parts[1].strip()
+
+            open_app(app_part)
+            webbrowser.open(f"https://www.google.com/search?q={query}")
+
+            return f"Opening {app_part} and searching {query}"
+        except:
+            return "Couldn't process combined command."
+
+    # =====================================================
+    # OPEN (SMART)
+    # =====================================================
+    if lower.startswith("open "):
+        target = user_input.replace("open ", "").strip().lower()
+
+        # 🔥 CLEAN "drive" / "disk"
+        target = target.replace("drive", "").replace("disk", "").strip()
+
+        # 🔥 DRIVE (c, d, etc.)
+        if len(target) == 1:
+            return open_path(target)
+
+        if target.endswith(":"):
+            return open_path(target)
+
+        # 🔥 PATH
+        if "\\" in target or ":" in target:
+            return open_path(target)
+
+        return open_app(target)
 
     # =====================================================
     # SYSTEM CONTROL
     # =====================================================
-    if lower.startswith("open "):
-        app = user_input.replace("open ", "").strip()
-        return open_app(app)
-
     if "shutdown" in lower:
         pending_system_action = "shutdown"
         return "⚠ Shutdown system? (yes/no)"
@@ -214,7 +260,7 @@ def route_command(user_input: str) -> str:
         return "⚠ Restart system? (yes/no)"
 
     # =====================================================
-    # 🧠 ORCHESTRATOR (FINAL AUTHORITY)
+    # ORCHESTRATOR
     # =====================================================
     result = orchestrate(user_input)
 
@@ -223,7 +269,6 @@ def route_command(user_input: str) -> str:
         action = result.get("action")
         target = result.get("target")
 
-        # 🔥 HANDLE ACTIONS
         if action == "terminate":
             pending_termination = target
             return f"Terminate {target}? (yes/no)"
@@ -231,7 +276,6 @@ def route_command(user_input: str) -> str:
         if action == "dev_read":
             return read_file(target)
 
-        # 🔥 MOST IMPORTANT FIX → RETURN MESSAGE DIRECTLY
         if "message" in result:
             return compress_response(result["message"])
 
@@ -243,9 +287,6 @@ def route_command(user_input: str) -> str:
     if not response:
         return "I didn't catch that properly."
 
-    # =====================================================
-    # ANTI-REPEAT
-    # =====================================================
     if response == last_response:
         return "I already answered that."
 

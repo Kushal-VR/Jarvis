@@ -13,7 +13,7 @@ from brain.web.news import get_ai_news
 from brain.web.search import search_duckduckgo
 from brain.web.scraper import extract_titles
 from brain.web.summarizer import summarize_list
-
+from brain.context import store_results, get_last_results
 
 # =====================================================
 # INIT
@@ -112,7 +112,7 @@ def orchestrate(user_input: str):
 
             for i, item in enumerate(news, 1):
                 summary += f"{i}. {item.strip()}\n"
-
+            store_results(news)   # 🔥 STORE RESULTS
             return {"message": summary.strip()}
 
         # =====================================================
@@ -136,7 +136,7 @@ def orchestrate(user_input: str):
 
         if not data:
             return {"message": "No results found."}
-
+        store_results(data)   # 🔥 STORE RESULTS
         return {"message": data}
 
     # =====================================================
@@ -174,7 +174,46 @@ def orchestrate(user_input: str):
     # =====================================================
     if "what do you remember" in text:
         return {"message": get_all_memory()}
+    # =====================================================
+    # 🧠 CONTEXT-AWARE FOLLOW UPS
+    # =====================================================
+    if "first" in text or "second" in text or "third" in text:
 
+        results = get_last_results()
+
+        if not results:
+           return {"message": "No previous results found."}
+
+        index = 0
+
+        if "second" in text:
+         index = 1
+        elif "third" in text:
+         index = 2
+
+        if index >= len(results):
+         return {"message": "Result not available."}
+
+        item = results[index]
+
+        return {
+          "message": f"Here is more about it:\n{item}"
+        }
+
+
+    if "summarize" in text or "summary" in text:
+
+        results = get_last_results()
+
+        if not results:
+          return {"message": "Nothing to summarize."}
+
+        summary = "Summary of results:\n\n"
+
+        for i, item in enumerate(results[:3], 1):
+           summary += f"{i}. {item}\n"
+
+        return {"message": summary.strip()}
     # =====================================================
     # DEFAULT → LLM
     # =====================================================
