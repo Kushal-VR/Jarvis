@@ -56,3 +56,43 @@ class GitController:
 
     def git_status(self, repo_path: str) -> str:
         return self._run_git(repo_path, ["status"])
+
+    def git_checkout(self, repo_path: str, branch: str, create: bool = False) -> str:
+        """Checks out a branch, optionally creating it first."""
+        args = ["checkout", "-b", branch] if create else ["checkout", branch]
+        return self._run_git(repo_path, args)
+
+    def git_merge(self, repo_path: str, branch: str) -> str:
+        """Merges another branch into the active branch."""
+        return self._run_git(repo_path, ["merge", branch])
+
+    def git_delete_branch(self, repo_path: str, branch: str, delete_remote: bool = False) -> str:
+        """Deletes a local branch, and optionally a remote branch on origin."""
+        res = self._run_git(repo_path, ["branch", "-d", branch])
+        if delete_remote:
+            try:
+                res += "\n" + self._run_git(repo_path, ["push", "origin", "--delete", branch])
+            except Exception as e:
+                res += f"\nFailed to delete remote branch: {e}"
+        return res
+
+    def git_pull(self, repo_path: str, remote: str = "origin", branch: str = "main") -> str:
+        """Pulls changes from a remote branch."""
+        return self._run_git(repo_path, ["pull", remote, branch])
+
+    def git_branch_list(self, repo_path: str) -> str:
+        """Lists local and remote branches."""
+        return self._run_git(repo_path, ["branch", "-a"])
+
+    def git_log(self, repo_path: str, limit: int = 5) -> str:
+        """Displays commit log."""
+        return self._run_git(repo_path, ["log", f"-n", str(limit), "--oneline"])
+
+    def git_remote_list(self, repo_path: str) -> str:
+        """Lists configured remotes."""
+        return self._run_git(repo_path, ["remote", "-v"])
+
+    def git_fetch(self, repo_path: str) -> str:
+        """Fetches remote updates."""
+        return self._run_git(repo_path, ["fetch"])
+

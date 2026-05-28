@@ -54,56 +54,61 @@ class NaturalLanguageUnderstander:
             # Heuristic self-healing corrections for small models (llama3.2:1b)
             text = user_prompt.lower().strip()
             
-            # Forced Screen COMMAND Heuristic
-            screen_indicators = ["screen", "display", "monitor", "ocr", "visible", "what is on my", "explain my screen", "read my screen", "explain what is in my screen", "the code", "this code", "my code", "explain the code", "explain this code", "explain code", "explain this", "debug this", "debug the code", "sifting", "what is the code"]
+            # Screen automation commands (reading, describing, clicking the screen)
+            screen_indicators = [
+                "what is on my screen", "what is on the screen", "explain my screen", 
+                "explain what is on my screen", "describe my screen", "read my screen", 
+                "describe the screen", "read screen", "what's on screen", "what is visible", 
+                "screen ocr", "find on screen", "click on screen", "explain what is in my screen",
+                "what is on my screen right now", "explain what is in my screen", "explain the screen",
+                "what's on my screen right now"
+            ]
             
-            # General Tool Indicators list
-            tool_keywords = [
-                "screen", "display", "monitor", "ocr", "visible", "what is on my", "explain my screen", "read my screen", "explain what is in my screen",
-                "folder", "directory", "file", "path", "find", "locate", "read content", "write content", "save as",
-                "search", "google", "web", "website", "scrape", "maps", "leads", "music", "play", "youtube", "spotify",
-                "send", "message", "email", "whatsapp", "telegram", "chat",
-                "git", "commit", "push", "pull", "github", "project", "code", "run", "npm", "pip", "python", "compile"
+            # Verbs that indicate a system action/command
+            command_verbs = [
+                "open", "launch", "run", "create", "delete", "send", "message", "write", 
+                "git", "commit", "push", "pull", "type", "click", "play", "search", 
+                "google", "scrape", "find", "locate", "npm", "pip", "install", "fork", "scan"
+            ]
+
+            # Verbs/Phrases that indicate a thinking/reasoning query
+            thinking_triggers = [
+                "explain", "teach", "how does", "how to", "why did", "debug", "refactor", 
+                "write a code", "write code", "how do i", "explain this"
             ]
 
             is_screen_query = any(ind in text for ind in screen_indicators)
-            is_tool_query = any(k in text for k in tool_keywords)
-            
+            has_command_verb = any(v in text.split() or text.startswith(v) for v in command_verbs)
+            has_thinking_trigger = any(t in text for t in thinking_triggers)
+
             if is_screen_query:
                 result["classification"] = "COMMAND"
                 result["intent"] = "screen_automation"
                 self.logger.info("Heuristic self-healing: forced screen command to COMMAND classification.")
                 classification = "COMMAND"
-            elif is_tool_query and result.get("classification", "DIRECT") == "DIRECT":
-                # If NLU thought it was DIRECT but it contains tool keywords, promote it!
-                if any(t in text for t in ["explain", "teach", "how does", "how to", "why did", "debug", "refactor"]):
-                    result["classification"] = "THINKING"
-                    classification = "THINKING"
-                else:
-                    result["classification"] = "COMMAND"
-                    classification = "COMMAND"
-                self.logger.info(f"Heuristic self-healing: promoted tool/system query to {classification}.")
+            elif has_thinking_trigger:
+                result["classification"] = "THINKING"
+                classification = "THINKING"
+                self.logger.info("Heuristic self-healing: forced query to THINKING classification.")
+            elif has_command_verb and result.get("classification", "DIRECT") == "DIRECT":
+                result["classification"] = "COMMAND"
+                classification = "COMMAND"
+                self.logger.info("Heuristic self-healing: forced command-verb query to COMMAND classification.")
             else:
                 classification = result.get("classification", "DIRECT")
                 
             if classification == "COMMAND":
-                question_triggers = ["what is", "who is", "where is", "when was", "how many", "tell me a", "give me a fact", "what are"]
-                command_verbs = ["open", "launch", "run", "create", "delete", "send", "message", "write", "git", "commit", "push", "type", "click"]
-                
+                question_triggers = ["what is", "who is", "where is", "when was", "how many", "tell me a", "give me a fact", "what are", "why is", "how do"]
                 is_question = any(text.startswith(t) or text.endswith("?") for t in question_triggers)
                 has_verb = any(v in text for v in command_verbs)
                 
-                # Do NOT demote if it's a screen query or contains tool indicators!
-                if is_screen_query or is_tool_query:
-                    pass
-                elif is_question and not has_verb:
+                if is_question and not has_verb and not is_screen_query:
                     result["classification"] = "DIRECT"
                     self.logger.info("Heuristic self-healing: corrected misclassification from COMMAND to DIRECT.")
                     classification = "DIRECT"
                     
                 if classification == "COMMAND":
-                    thinking_triggers = ["explain", "teach", "how does", "how to", "why did", "debug", "refactor", "write a code"]
-                    if any(t in text for t in thinking_triggers) and not is_screen_query:
+                    if has_thinking_trigger and not is_screen_query:
                         result["classification"] = "THINKING"
                         self.logger.info("Heuristic self-healing: corrected misclassification from COMMAND to THINKING.")
             

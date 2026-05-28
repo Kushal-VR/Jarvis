@@ -704,4 +704,187 @@ def register_all_tools(
         git.git_push(repo_path)
         return "Staged, committed, and pushed changes successfully."
 
+    @registry.register("git_checkout_branch", permission_level="HIGH")
+    def git_checkout_branch(repo_path: str, branch: str, create: bool = False) -> str:
+        """Checks out a git branch, optionally creating it if create is True."""
+        return git.git_checkout(repo_path, branch, create)
+
+    @registry.register("git_merge_branch", permission_level="HIGH")
+    def git_merge_branch(repo_path: str, branch: str) -> str:
+        """Merges a git branch into the current checked out branch."""
+        return git.git_merge(repo_path, branch)
+
+    @registry.register("git_delete_branch", permission_level="HIGH")
+    def git_delete_branch(repo_path: str, branch: str, delete_remote: bool = False) -> str:
+        """Deletes a local branch, and optionally a remote branch (delete_remote=True)."""
+        return git.git_delete_branch(repo_path, branch, delete_remote)
+
+    @registry.register("git_pull_branch", permission_level="HIGH")
+    def git_pull_branch(repo_path: str, remote: str = "origin", branch: str = "main") -> str:
+        """Pulls latest updates from remote repository branch."""
+        return git.git_pull(repo_path, remote, branch)
+
+    @registry.register("git_branch_list", permission_level="LOW")
+    def git_branch_list(repo_path: str) -> str:
+        """Lists all local and remote branches of the git repository."""
+        return git.git_branch_list(repo_path)
+
+    @registry.register("git_log", permission_level="LOW")
+    def git_log(repo_path: str, limit: int = 5) -> str:
+        """Shows the git commit logs."""
+        return git.git_log(repo_path, limit)
+
+    @registry.register("git_remote_list", permission_level="LOW")
+    def git_remote_list(repo_path: str) -> str:
+        """Lists all configured remotes for the git repository."""
+        return git.git_remote_list(repo_path)
+
+    @registry.register("git_fetch", permission_level="MEDIUM")
+    def git_fetch(repo_path: str) -> str:
+        """Fetches remote updates from remote repository."""
+        return git.git_fetch(repo_path)
+
+    @registry.register("git_clone_repo", permission_level="HIGH")
+    def git_clone_repo(repo_url: str, dest_path: str) -> str:
+        """Clones a remote git repository to dest_path."""
+        return git.git_clone(repo_url, dest_path)
+
+    @registry.register("install_project_dependencies", permission_level="MEDIUM")
+    def install_project_dependencies(repo_path: str) -> str:
+        """Automatically detects project type and installs dependencies (npm install, pip install, etc.)."""
+        logger.info(f"Installing dependencies in {repo_path}...")
+        results = []
+        
+        # Check npm
+        if os.path.exists(os.path.join(repo_path, "package.json")):
+            logger.info("package.json found. Running npm install...")
+            res = subprocess.run(
+                ["npm", "install"],
+                cwd=repo_path,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            results.append(f"npm install exit code {res.returncode}. Stdout:\n{res.stdout[:500]}\nStderr:\n{res.stderr[:500]}")
+            
+        # Check pip requirements
+        req_txt = os.path.join(repo_path, "requirements.txt")
+        if os.path.exists(req_txt):
+            logger.info("requirements.txt found. Running pip install...")
+            res = subprocess.run(
+                ["pip", "install", "-r", "requirements.txt"],
+                cwd=repo_path,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            results.append(f"pip install exit code {res.returncode}. Stdout:\n{res.stdout[:500]}\nStderr:\n{res.stderr[:500]}")
+            
+        # Check poetry/pyproject
+        pyproj = os.path.join(repo_path, "pyproject.toml")
+        if os.path.exists(pyproj) and not os.path.exists(req_txt):
+            logger.info("pyproject.toml found. Running pip install...")
+            res = subprocess.run(
+                ["pip", "install", "."],
+                cwd=repo_path,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            results.append(f"pip install . exit code {res.returncode}. Stdout:\n{res.stdout[:500]}\nStderr:\n{res.stderr[:500]}")
+            
+        if not results:
+            return "No package.json, requirements.txt, or pyproject.toml found to install dependencies."
+        return "\n\n".join(results)
+
+    @registry.register("run_project", permission_level="MEDIUM")
+    def run_project(repo_path: str) -> str:
+        """Automatically detects project type and starts/runs the project in the background."""
+        logger.info(f"Starting project in {repo_path}...")
+        
+        # Check npm
+        if os.path.exists(os.path.join(repo_path, "package.json")):
+            logger.info("Running npm run dev or start...")
+            # Try npm run dev or fall back to npm start
+            subprocess.Popen("npm run dev", cwd=repo_path, shell=True)
+            return "Started npm run dev in the background."
+            
+        # Check python main.py
+        main_py = os.path.join(repo_path, "main.py")
+        if os.path.exists(main_py):
+            logger.info("Running python main.py...")
+            subprocess.Popen(["python", "main.py"], cwd=repo_path, shell=True)
+            return "Started python main.py in the background."
+            
+        # Check python app.py
+        app_py = os.path.join(repo_path, "app.py")
+        if os.path.exists(app_py):
+            logger.info("Running python app.py...")
+            subprocess.Popen(["python", "app.py"], cwd=repo_path, shell=True)
+            return "Started python app.py in the background."
+            
+        return "No standard entry point (package.json, main.py, app.py) found to run the project."
+
+    @registry.register("system_security_scan", permission_level="MEDIUM")
+    def system_security_scan() -> str:
+        """Triggers a local Windows Defender quick security scan and audits firewalls/ports."""
+        logger.info("Initiating system security scan...")
+        results = []
+        
+        # 1. Trigger Windows Defender quick scan
+        try:
+            logger.info("Starting Windows Defender Quick Scan...")
+            cmd = ["powershell", "-Command", "Start-MpScan -ScanType QuickScan -ErrorAction SilentlyContinue"]
+            subprocess.Popen(cmd, shell=True)
+            results.append("Windows Defender Quick Scan: Triggered successfully and scanning in the background.")
+        except Exception as e:
+            results.append(f"Windows Defender Scan: Failed to trigger ({e})")
+            
+        # 2. Audit Firewall
+        try:
+            logger.info("Auditing Firewall settings...")
+            cmd = ["powershell", "-Command", "Get-NetFirewallProfile | Select-Object Name, Enabled | ConvertTo-Json"]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode == 0:
+                results.append(f"Firewall Status:\n{res.stdout.strip()}")
+            else:
+                results.append("Firewall Status: Unable to query firewall profile.")
+        except Exception as e:
+            results.append(f"Firewall Status: Query failed ({e})")
+            
+        # 3. Check Listening Ports
+        try:
+            logger.info("Auditing listening ports...")
+            cmd = ["powershell", "-Command", "Get-NetTCPConnection -State Listen | Select-Object LocalAddress, LocalPort, OwningProcess -First 10 | ConvertTo-Json"]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode == 0:
+                results.append(f"Active Listening Ports (Top 10):\n{res.stdout.strip()}")
+            else:
+                results.append("Listening Ports: Unable to query active TCP connections.")
+        except Exception as e:
+            results.append(f"Listening Ports: Query failed ({e})")
+            
+        return "\n\n=== Security Audit & Scan Report ===\n\n" + "\n\n".join(results)
+
+    @registry.register("get_desktop_path", permission_level="LOW")
+    def get_desktop_path() -> str:
+        """Resolves the user's correct Windows Desktop path dynamically from the registry."""
+        import winreg
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, 
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+            )
+            path, _ = winreg.QueryValueEx(key, "Desktop")
+            resolved = os.path.expandvars(path)
+            logger.info(f"Resolved Desktop path via registry: {resolved}")
+            return resolved
+        except Exception as e:
+            fallback = os.path.join(os.path.expanduser("~"), "Desktop")
+            logger.warning(f"Failed to query registry for Desktop path, falling back to: {fallback}. Error: {e}")
+            return fallback
+
     logger.info("Registered all modular system tools.")
