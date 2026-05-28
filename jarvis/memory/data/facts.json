@@ -1,0 +1,32 @@
+[
+  {
+    "fact": "User's name is Kushal, also known as King.",
+    "permanent": true,
+    "created": 1779646083.9626782,
+    "expiry": null
+  },
+  {
+    "fact": "User prefers concise spoken answers, no bullet points.",
+    "permanent": true,
+    "created": 1779646083.9626787,
+    "expiry": null
+  },
+  {
+    "fact": "My favorite compiler is clang",
+    "permanent": false,
+    "created": 1779705542.9602695,
+    "expiry": 1782297542.9602695
+  },
+  {
+    "fact": "Karnataka",
+    "permanent": true,
+    "created": 1779869229.101247,
+    "expiry": null
+  },
+  {
+    "fact": "NONE\nJarvis\ncan see code on screen\nexplain it to me",
+    "permanent": true,
+    "created": 1779870091.4544399,
+    "expiry": null
+  }
+]

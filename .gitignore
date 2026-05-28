@@ -21,3 +21,7 @@ Thumbs.db
 
 # Memory (optional)
 memory/memory_store.json
+
+Models/
+tmp/
+

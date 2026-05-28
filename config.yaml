@@ -1,0 +1,62 @@
+# Jarvis System Configuration
+
+ollama:
+  host: "http://localhost:11434"
+  models:
+    intent: "llama3.2:1b"
+    planning: "qwen2.5:7b-instruct"
+    reasoning: "deepseek-r1:7b"
+    embedding: "nomic-embed-text"
+    coding: "qwen2.5-coder:7b"
+  # Default keep_alive in seconds. 15s keeps the model loaded in case of immediate follow-ups.
+  keep_alive: 15
+  # Keep-alive overrides for specific models (negative value e.g. -1 keeps loaded indefinitely)
+  keep_alive_overrides:
+    intent: "-1"
+    embedding: "-1"
+
+paths:
+  workspace: "D:/My Projects Dekstop/Jarvis/jarvis/workspace"
+  logs: "D:/My Projects Dekstop/Jarvis/jarvis/logs"
+  memory: "D:/My Projects Dekstop/Jarvis/jarvis/memory/data"
+
+security:
+  sandbox_enabled: true
+  whitelist_commands:
+    - "git"
+    - "python"
+    - "pip"
+    - "npm"
+    - "node"
+    - "echo"
+    - "dir"
+    - "ls"
+    - "mkdir"
+    - "rmdir"
+    - "del"
+    - "rm"
+    - "cat"
+    - "type"
+    - "ping"
+  permission_levels:
+    LOW: ["read", "list", "search", "tts", "stt", "open_app"]
+    MEDIUM: ["write", "create", "execute_cmd"]
+    HIGH: ["delete", "git_push", "system_modify"]
+
+voice:
+  vosk_model_dir: "D:/My Projects Dekstop/Jarvis/jarvis/voice/models/vosk"
+  whisper_model: "base.en" # High accuracy lightweight model
+  piper_model_path: "D:/My Projects Dekstop/Jarvis/jarvis/voice/models/piper/en_US-ryan-medium.onnx"
+  use_tts_fallback: true # If Piper is missing, use pyttsx3 (SAPI5) fallback
+  rate_edge: "+10%"       # Speed rate adjustment for edge-tts (faster)
+  rate_piper: 0.95        # Length scale for Piper (lower is faster)
+  rate_sapi: 195          # Speaking rate for SAPI5 (higher is faster)
+  silence_timeout: 2.5    # Seconds of silence before ending VAD recording
+
+vision:
+  florence_model: "microsoft/Florence-2-base"
+  use_gpu: true
+
+web:
+  headless: true
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
